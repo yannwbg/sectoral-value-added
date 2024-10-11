@@ -8,7 +8,7 @@ country_list <- read_csv("data/processed/country_list.csv") %>%
 
 #Load original data
 raw <- read_csv("data/raw/global/UNdata_4_current.csv",
-                col_types = c("cccccnncncnn")) %>%
+                col_types = c("cccccnncncnc")) %>%
   select(country = "Country or Area",
          table_code = "SNA93 Table Code",
          subgroup = "Sub Group",
