@@ -12,7 +12,7 @@ files_list <- list.files(path = "data/raw/global", pattern = "3_current", full.n
 raw <- map(files_list, function(x) {
   
   read_csv(x,
-           col_types = c("cccccnncncnc")) %>%
+           col_types = c("cccccnncncnn")) %>%
     select(country = "Country or Area",
            table_code = "SNA93 Table Code",
            subgroup = "Sub Group",
