@@ -1,10 +1,12 @@
 library(tidyverse)
 
+#parameters
+sd_threshold <- 0.5 #Threshold used to highlight outliers in terms of standard deviation
 
 #Load data----
 data <- read_csv("data/temp/un4_current.csv")
 footnote <- read_csv("data/temp/un4_current_footnote.csv")
-sector <- read_csv("data/temp/un4_sector.csv")
+#sector <- read_csv("data/temp/un4_sector.csv")
 
 #Generate quality check variables----
 sector_list <- c("A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M+N", "O+P+Q", "R+S+T") 
@@ -63,5 +65,23 @@ data_processed <- data_coverage_check %>%
          growth_to_prev = (value - lag(value))/lag(value)) %>%
   ungroup()
 
-#Sanity checks
+#Sanity checks----
 check <- data_processed %>%
+  mutate(mean = mean(growth_to_prev, na.rm = TRUE),
+         sd = sd(growth_to_prev, na.rm = TRUE), 
+         check_outliers = !(abs(growth_to_prev - mean) > sd_threshold*sd)) %>% #Inversed, TRUE = no outliers, FALSE = outliers - makes it easier to filter in final step.
+  group_by(iso3, series_code, subseries) %>%
+  mutate(min_year = min(year),
+         max_year = max(year)) %>%
+  ungroup() %>%
+  group_by(iso3, series_code, subseries, name) %>%
+  arrange(year) %>%
+  mutate(check_growth_next = (growth_to_next == lead(growth_to_prev)), #check that growth rate are consistent
+         check_growth_prev = (growth_to_prev == lag(growth_to_next)),
+         check_year_sector_min = min_year == min(year), #check that the sector coverage is the same of the series coverage
+         check_year_sector_max = max_year == max(year)) %>%
+  ungroup() %>%
+  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #44 observations are picked up (all for outliers with threshold being 0.5). Will be investigated at a later date
+
+#Save----
+write_csv(data_processed, "data/processed/un4_current.csv")
