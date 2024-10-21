@@ -67,9 +67,11 @@ data_processed <- data_coverage_check %>%
 
 #Sanity checks----
 check <- data_processed %>%
-  mutate(mean = mean(growth_to_prev, na.rm = TRUE),
-         sd = sd(growth_to_prev, na.rm = TRUE), 
-         check_outliers = !(abs(growth_to_prev - mean) > sd_threshold*sd)) %>% #Inversed, TRUE = no outliers, FALSE = outliers - makes it easier to filter in final step.
+  mutate(mean_prev = mean(growth_to_prev, na.rm = TRUE),
+         sd_prev = sd(growth_to_prev, na.rm = TRUE), 
+         mean_next = mean(growth_to_next, na.rm = TRUE),
+         sd_next = sd(growth_to_next, na.rm = TRUE), 
+         check_outliers = !(abs(growth_to_prev - mean_prev) > sd_threshold*sd_prev | abs(growth_to_next - mean_next) > sd_threshold*sd_next)) %>% #Inversed, TRUE = no outliers, FALSE = outliers - makes it easier to filter in final step.
   group_by(iso3, series_code, subseries) %>%
   mutate(min_year = min(year),
          max_year = max(year)) %>%
@@ -81,7 +83,7 @@ check <- data_processed %>%
          check_year_sector_min = min_year == min(year), #check that the sector coverage is the same of the series coverage
          check_year_sector_max = max_year == max(year)) %>%
   ungroup() %>%
-  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #44 observations are picked up (all for outliers with threshold being 0.5). Will be investigated at a later date
+  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #44 (86 mirroring) observations are picked up (all for outliers with threshold being 0.5). Will be investigated at a later date
 
 #Save----
 write_csv(data_processed, "data/processed/un4_current.csv")
