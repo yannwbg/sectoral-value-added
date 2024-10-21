@@ -6,6 +6,7 @@ sd_threshold <- 0.5 #Threshold used to highlight outliers in terms of standard d
 #Load data----
 data <- read_csv("data/temp/un4_current.csv")
 footnote <- read_csv("data/temp/un4_current_footnote.csv")
+series_code <- read_csv("data/temp/code_current_4.csv")
 #sector <- read_csv("data/temp/un4_sector.csv")
 
 #Generate quality check variables----
@@ -85,5 +86,11 @@ check <- data_processed %>%
   ungroup() %>%
   filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #44 (86 mirroring) observations are picked up (all for outliers with threshold being 0.5). Will be investigated at a later date
 
+#Select series----
+data_selected <- data_processed %>%
+  right_join(series_code, by = c("country", "year", "series_code" = "final_series")) %>%
+  filter(!(overlap == TRUE & is.na(growth_to_next))) %>%
+  select(-c(overlap, "...1"))
+
 #Save----
-write_csv(data_processed, "data/processed/un4_current.csv")
+write_csv(data_selected, "data/processed/un4_current.csv")
