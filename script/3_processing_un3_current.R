@@ -2,6 +2,11 @@ library(tidyverse)
 
 #Parameters
 sd_threshold <- 0.5 #Threshold used to highlight outliers in terms of standard deviation
+always_keep <- c("C", "D", "E", "F", "I", "L", "P", "B.1g", "B.1*g") #Sectors that are never part of original composites
+possible_combinations <- list(c("A", "B"), #Original composites
+                              c("G", "H"),
+                              c("J", "K"),
+                              c("M", "N", "O"))
 
 #Load data----
 data <- read_csv("data/temp/un3_current.csv")
@@ -34,63 +39,29 @@ check_sectors <- function(sector_list, present_sectors) {
   return(missing_sectors)
 }
 #Function to filter composite sectors
-filter_sectors_ISIC3 <- function(df) {
-  # Get unique combinations of country, year, and series
-  unique_combinations <- unique(df[, c("country", "year", "series_code")])
-  
-  # Initialize an empty data frame to store the results
-  filtered_df <- data.frame()
-  
-  for (i in 1:nrow(unique_combinations)) {
-    
-    print(paste(round((i/nrow(unique_combinations))*100,2), "% completed."))
-    
-    # Extract the current combination
-    combination <- unique_combinations[i, ]
-    
-    # Filter the data frame for the current combination
-    combination_df <- subset(df, country == combination$country & year == combination$year & series_code == combination$series_code)
-    
-    #Select sectors that always need to be present
-    filtered_df <- rbind(filtered_df, subset(combination_df, code %in% c("C", "D", "E", "F", "I", "L", "P", "B.1g")))
-    
-    # Check if both 'A' and 'B' are present
-    if ('A' %in% combination_df$code & 'B' %in% combination_df$code) {
-      # Keep both 'A' and 'B'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code %in% c('A', 'B')))
+filter_sectors <- function(df, always_keep, combinations) {
+  # Function to check and filter combinations
+  check_combinations <- function(data, comb) {
+    if (all(comb %in% data$code)) {
+      return(data %>% filter(code %in% comb))
     } else {
-      # Keep 'A+B'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code == 'A+B'))
+      combined_code <- paste(comb, collapse = "+")
+      return(data %>% filter(code == combined_code))
     }
-    
-    # Check if both 'G' and 'H' are present
-    if ('G' %in% combination_df$code & 'H' %in% combination_df$code) {
-      # Keep both 'G' and 'H'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code %in% c('G', 'H')))
-    } else {
-      # Keep 'G+H'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code == 'G+H'))
-    }
-    
-    # Check if both 'J' and 'K' are present
-    if ('J' %in% combination_df$code & 'K' %in% combination_df$code) {
-      # Keep both 'J' and 'K'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code %in% c('J', 'K')))
-    } else {
-      # Keep 'J+K'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code == 'J+K'))
-    }
-    
-    # Check if both 'M', 'N' and 'O' are present
-    if ('M' %in% combination_df$code & 'N' %in% combination_df$code & 'O' %in% combination_df$code) {
-      # Keep both 'M', 'N' and 'O'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code %in% c('M', 'N', 'O')))
-    } else {
-      # Keep 'M+N+O'
-      filtered_df <- rbind(filtered_df, subset(combination_df, code == 'M+N+O'))
-    }
-    
   }
+  
+  # Group by country, year, and series_code
+  filtered_df <- df %>%
+    group_by(country, year, series_code) %>%
+    do({
+      data <- .
+      result <- data %>% filter(code %in% always_keep)
+      for (comb in combinations) {
+        result <- bind_rows(result, check_combinations(data, comb))
+      }
+      result
+    }) %>%
+    ungroup()
   
   return(filtered_df)
 }
@@ -164,13 +135,12 @@ split_composite_series <- function(df) {
   return(df)
 }
 
+#Filter sectors to only keep the ones we need----
+data_filtered <- data %>% 
+  filter_sectors(always_keep = always_keep, combinations = possible_combinations)
+
 #Generate quality check variables----
 sector_list <- c("A", "B", "A+B", "C", "D", "E", "F", "G", "H", "G+H", "I", "J", "K", "J+K", "L", "M", "N", "O", "M+N+O", "P")
-
-data_filtered <- data %>% 
-  filter_sectors_ISIC3() #Done separately as it takes several minutes
-write_rds(data_filtered, "data/temp/data_filtered.rds")
-data_filtered <- readRDS("data/temp/data_filtered.rds")
 
 data_coverage_check <- data_filtered %>%
   #Check sector coverage and validity for each country-year-series
@@ -178,10 +148,11 @@ data_coverage_check <- data_filtered %>%
   mutate(sector_missing_list = list(check_sectors(sector_list, unique(code))),
          sector_missing_n = length(first(sector_missing_list)),
          sector_missing_label = paste(first(sector_missing_list), collapse = ", "),
-         sector_full_coverage = ifelse(sector_missing_label %in% c("D", "E"), TRUE, (sector_missing_n == 0)), #We make the assumption that if only one of D or E is present, it includes the other
-         sum_sector = sum(value[code != "B.1g"]),
+         sector_full_coverage = ifelse(sector_missing_label == "P", TRUE, (sector_missing_n == 0)), #We make the assumption that if P is missing, it is included in O or M+N+O
+         sum_sector = sum(value[code != "B.1g" & code != "B.1*g"]),
          total_value = sum(value[code == "B.1g"]),
-         sum_check = (abs((sum_sector-total_value)/ total_value) <= 0.005 | (total_value == 0 & sector_full_coverage))) %>% #We make the assumption (for now) that if B.1g is not present the sum of sectors is valid if sector_full_coverage is valid
+         total_gdp = sum(value[code == "B.1*g"]),
+         sum_check = (abs((sum_sector-total_value)/ total_value) <= 0.005 | abs((sum_sector-total_gdp)/ total_gdp) <= 0.005 | (total_value == 0 & total_gdp == 0 & sector_full_coverage))) %>% #We make the assumption (for now) that if B.1g is not present the sum of sectors is valid if sector_full_coverage is valid
   ungroup() %>%
   #Create sub-series based on unique coverage
   group_by(country, series_code) %>%
@@ -196,20 +167,24 @@ data_coverage_check <- data_filtered %>%
          check_all_but_sector_coverage = (sum_check & year_full_coverage)) %>% # = True if all checks but sector_full_coverage are valid (this allows us to keep corner cases where small economies don't have a specific sector)
   ungroup() 
 
-nrow(data_coverage_check[data_coverage_check$check_all == TRUE,])/nrow(data_coverage_check) * 100 #39.04%
-nrow(data_coverage_check[data_coverage_check$check_all_but_sector_coverage == TRUE,])/nrow(data_coverage_check) * 100 #82.17% 
+nrow(data_coverage_check[data_coverage_check$check_all == TRUE,])/nrow(data_coverage_check) * 100 #68.84% (compared to 39.04% if we require P to be present)
+nrow(data_coverage_check[data_coverage_check$check_all_but_sector_coverage == TRUE,])/nrow(data_coverage_check) * 100 #82.41% 
 
 #Process data----
 
 #Split composite sectors into their components when possible
 data_composite_adjustement_prep <- data_coverage_check %>%
-  filter(check_all == TRUE & code != "B.1g") %>%
+  filter(check_all == TRUE & code != "B.1g" & code != "B.1*g") %>%
   select(iso3, year, series_code, subseries, code, value) %>%
   mutate(combination_id = interaction(iso3, series_code, subseries, drop = TRUE))
 
 data_composite_adjustement_prep_split <- lapply(split(data_composite_adjustement_prep, data_composite_adjustement_prep$combination_id), function(df) df %>% select(-combination_id))
 
 data_composite_adjusted <- do.call(rbind, lapply(data_composite_adjustement_prep_split, split_composite_series))
+
+nrow(unique(data_composite_adjusted[data_composite_adjusted$adjusted_composite == TRUE & data_composite_adjusted$old_code %in% c("J+K", "M+N+O"),
+                                    c("iso3", "year", "series_code", "subseries", "old_code")]))/nrow(unique(data_composite_adjusted[data_composite_adjusted$old_code %in% c("J+K", "M+N+O"), c("iso3", "year", "series_code", "subseries", "old_code")])) * 100 #9.30% of the relevant ("J+K" and "M+N+O") composites could be distributed into their component
+
 
 data_processed <- data_composite_adjusted %>%
   left_join(data_coverage_check %>%
@@ -259,10 +234,7 @@ check <- data_processed %>%
          check_year_sector_min = min_year == min(year), #check that the sector year coverage is the same of the series year coverage
          check_year_sector_max = max_year == max(year)) %>%
   ungroup() %>%
-  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #333 observations are picked up. 
-#A large portion (303) due to sector coverage changing but across composite (eg. G+H for some year but G and H for other years)
-#=> after dealing with composite I only have 30 rows with issues which is a good check that the composite function seems to work
-#The remaining 30 are all due to outliers, will need to be investigated at a later point
+  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #0
 
 #Select series----
 data_selected <- data_processed %>%
@@ -270,5 +242,13 @@ data_selected <- data_processed %>%
   filter(!(overlap == TRUE & is.na(growth_to_next))) %>%
   select(-c(overlap, "...1"))
 
+valid_data_list <- unique(data_selected[, c("country", "year")])
+
+#Highlight potential country-year where data_processed could fill gap if we don't find other sources
+gap_filler <- setdiff(unique(data_processed[, c("country", "year")]), valid_data_list)
+
 #Save----
 write_csv(data_selected, "data/processed/un3_current.csv")
+write_csv(valid_data_list, "data/processed/un3_current_list.csv")
+write_csv(gap_filler, "data/temp/un3_current_gap_filler_list.csv")
+write_csv(data_processed, "data/temp/un3_current_gap_filler_data.csv")
