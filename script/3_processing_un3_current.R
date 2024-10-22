@@ -94,48 +94,83 @@ filter_sectors_ISIC3 <- function(df) {
   
   return(filtered_df)
 }
-#Function to compute composite sector growth
-compositie_growth <- function(df) {
+#Function to distribute composite sector value into its components based on components' proportion in closest available year
+split_composite_series <- function(df) {
   
-  df <- data_coverage_check %>%
-    filter(check_all == TRUE & code != "B.1g")
+  df <- df %>%
+    mutate(adjusted_composite = FALSE,
+           old_code = code)
   
-  df_composite <- df %>%
-    group_by(iso3, country, series_code, subseries) %>%
-    mutate(composite_gh = all(c("G", "H", "G+H") %in% unique(code)),
-           composite_jk = all(c("J", "K", "J+K") %in% unique(code)),
-           composite_mno = all(c("M", "N", "O", "M+N+O") %in% unique(code))) %>%
-    ungroup() %>%
-    filter((composite_gh & code %in% c("G", "H", "G+H")) | (composite_jk & code %in% c("J", "K", "J+K")) | (composite_mno & code %in% c("M", "N", "O", "M+N+O"))) %>%
-    mutate(name = case_when(code %in% c("G", "H", "G+H") ~ "G+H",
-                            code %in% c("J", "K", "J+K") ~ "J+K",
-                            code %in% c("M", "N", "O", "M+N+O") ~ "M+N+O"))
+  # Identify composite series and their components
+  composite_series <- unique(df$code[grepl("\\+", df$code)])
   
-  df_composite_growth <- df_composite %>%
-    group_by(iso3, country, year, series_code, subseries, name) %>%
-    summarise(value = sum(value)) %>%
-    ungroup() %>%
-    group_by(iso3, country, name, series_code, subseries) %>%
-    arrange(year) %>%
-    mutate(growth_to_next = (lead(value) - value)/value,
-           growth_to_prev = (value - lag(value))/lag(value)) %>%
-    ungroup()
+  # Function to find the closest reference year
+  find_reference_year <- function(df, components) {
+    years_with_components <- df %>%
+      filter(code %in% components) %>%
+      group_by(year) %>%
+      summarise(count = n()) %>%
+      filter(count == length(components)) %>%
+      pull(year)
+    
+    if (length(years_with_components) == 0) {
+      return(NA)
+    }
+    
+    return(min(years_with_components))
+  }
   
-  df_composite_adjusted <- df_composite_growth %>%
-    full_join(df_composite, by = c("iso3", "country", "year", "series_code", "subseries", "name")) %>%
-    mutate(code_split = str_split(code, "\\+")) %>%
-    unnest(code_split)
+  # Split composite series into components for each composite
+  for (comp in composite_series) {
+    components <- unlist(strsplit(comp, "\\+"))
+    
+    # Find the closest reference year
+    reference_year <- find_reference_year(df, components)
+    
+    if (!is.na(reference_year)) {# Calculate proportions for each component series
+    reference_df <- subset(df, year == reference_year & code %in% components)
+    total_value <- sum(reference_df$value)
+    proportions <- sapply(components, function(comp) {
+      sum(reference_df$value[reference_df$code == comp]) / total_value
+    })
+    
+    # Apply proportions to split composite series in other years
+    for (year in unique(df$year)) {
+      if (year != reference_year) {
+        composite_value <- df$value[df$year == year & df$code == comp]
+        if (length(composite_value) > 0) {
+          for (i in seq_along(components)) {
+            new_row <- data.frame(
+              iso3 = ifelse(length(unique(df$iso3[df$year == year & df$code == comp])) > 0, unique(df$iso3[df$year == year & df$code == comp]), NA),
+              year = year,
+              series_code = ifelse(length(unique(df$series_code[df$year == year & df$code == comp])) > 0, unique(df$series_code[df$year == year & df$code == comp]), NA),
+              subseries = ifelse(length(unique(df$subseries[df$year == year & df$code == comp])) > 0, unique(df$subseries[df$year == year & df$code == comp]), NA),
+              code = components[i],
+              value = composite_value * proportions[i],
+              adjusted_composite = TRUE, 
+              old_code = comp
+            )
+            df <- rbind(df, new_row)
+          }
+          # Remove the original composite series row
+          df <- df[!(df$year == year & df$code == comp), ]
+        }
+      }
+    }} else {
+      next
+    }
+  }
   
-  
-  
-  
+  return(df)
 }
+
 #Generate quality check variables----
 sector_list <- c("A", "B", "A+B", "C", "D", "E", "F", "G", "H", "G+H", "I", "J", "K", "J+K", "L", "M", "N", "O", "M+N+O", "P")
 
 data_filtered <- data %>% 
   filter_sectors_ISIC3() #Done separately as it takes several minutes
 write_rds(data_filtered, "data/temp/data_filtered.rds")
+data_filtered <- readRDS("data/temp/data_filtered.rds")
 
 data_coverage_check <- data_filtered %>%
   #Check sector coverage and validity for each country-year-series
@@ -165,21 +200,20 @@ nrow(data_coverage_check[data_coverage_check$check_all == TRUE,])/nrow(data_cove
 nrow(data_coverage_check[data_coverage_check$check_all_but_sector_coverage == TRUE,])/nrow(data_coverage_check) * 100 #82.17% 
 
 #Process data----
-data_composite <- data_coverage_check %>%
-  filter(check_all == TRUE & code != "B.1g") %>%
-  group_by(iso3, country, series_code, subseries) %>%
-  mutate(composite_gh = all(c("G", "H", "G+H") %in% unique(code)),
-         composite_jk = all(c("J", "K", "J+K") %in% unique(code)),
-         composite_mno = all(c("M", "N", "O", "M+N+O") %in% unique(code))) %>%
-  ungroup() %>%
-  filter((composite_gh & code %in% c("G", "H", "G+H")) | (composite_jk & code %in% c("J", "K", "J+K")) | (composite_mno & code %in% c("M", "N", "O", "M+N+O"))) %>%
-  select(iso3, year, series_code, subseries, code, value) %>%
-  group_by(iso3, series_code, subseries) %>%
-  group_modify(~ split_composite_series(.x)) %>%
-  ungroup()
 
-data_processed <- data_coverage_check %>%
+#Split composite sectors into their components when possible
+data_composite_adjustement_prep <- data_coverage_check %>%
   filter(check_all == TRUE & code != "B.1g") %>%
+  select(iso3, year, series_code, subseries, code, value) %>%
+  mutate(combination_id = interaction(iso3, series_code, subseries, drop = TRUE))
+
+data_composite_adjustement_prep_split <- lapply(split(data_composite_adjustement_prep, data_composite_adjustement_prep$combination_id), function(df) df %>% select(-combination_id))
+
+data_composite_adjusted <- do.call(rbind, lapply(data_composite_adjustement_prep_split, split_composite_series))
+
+data_processed <- data_composite_adjusted %>%
+  left_join(data_coverage_check %>%
+              select(-value), by = c("iso3", "year", "series_code", "subseries", "old_code" = "code")) %>%
   mutate(name = case_when(code == "A+B" | code == "A" | code == "B" ~ "agr",
                           code == "C" ~ "min",
                           code == "D" ~ "man",
@@ -225,7 +259,10 @@ check <- data_processed %>%
          check_year_sector_min = min_year == min(year), #check that the sector year coverage is the same of the series year coverage
          check_year_sector_max = max_year == max(year)) %>%
   ungroup() %>%
-  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #333 observations are picked up. A large portion (303) due to sector coverage changing but across composite (eg. G+H for some year but G and H for other years)
+  filter(if_any(all_of(starts_with("check")), ~ . == FALSE)) #333 observations are picked up. 
+#A large portion (303) due to sector coverage changing but across composite (eg. G+H for some year but G and H for other years)
+#=> after dealing with composite I only have 30 rows with issues which is a good check that the composite function seems to work
+#The remaining 30 are all due to outliers, will need to be investigated at a later point
 
 #Select series----
 data_selected <- data_processed %>%
@@ -234,4 +271,4 @@ data_selected <- data_processed %>%
   select(-c(overlap, "...1"))
 
 #Save----
-write_csv(data_selected, "data/processed/un4_current.csv")
+write_csv(data_selected, "data/processed/un3_current.csv")
