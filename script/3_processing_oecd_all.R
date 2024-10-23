@@ -26,9 +26,9 @@ generate_combinations <- function(acceptable_missing_sectors) {
   valid_combinations <- c()
   
   # Loop through all possible combination lengths
-  for (i in 1:length(sectors)) {
+  for (i in 1:length(acceptable_missing_sectors)) {
     # Generate combinations of length i
-    combs <- combn(sectors, i, simplify = FALSE)
+    combs <- combn(acceptable_missing_sectors, i, simplify = FALSE)
     
     # Filter out combinations that contain both D and E
     combs <- combs[!sapply(combs, function(x) all(c("D", "E") %in% x))]
@@ -160,7 +160,7 @@ check <- data_bind %>%
 data_current <- data_bind %>%
   filter(series_type == "V")
 
-valid_current <- unique(data_current[, c("country", "year")])
+valid_current <- unique(data_current[, c("iso3", "year")])
 
 #constant
 priority <- c("LR" = 1, "L" = 2, "Y" = 3) #For each country-year, prioritize chained-volume (rebased) > chained-volume > previous year prices
@@ -181,10 +181,10 @@ nrow(data_constant %>%
 
 nrow(unique(data_bind[data_bind$series_type %in% c("LR", "L", "Y"), c("country", "year")])) == nrow(unique(data_constant[, c("country", "year")])) #TRUE. Making sure that no country-year has been lost in the process
 
-valid_constant <- unique(data_constant[, c("country", "year")])
+valid_constant <- unique(data_constant[, c("iso3", "year")])
 
 #Save----
 write_csv(data_current, "data/processed/oecd_current.csv")
 write_csv(valid_current, "data/processed/oecd_current_list.csv")
-write_csv(data_current, "data/processed/oecd_current.csv")
-write_csv(valid_current, "data/processed/oecd_current_list.csv")
+write_csv(data_constant, "data/processed/oecd_constant.csv")
+write_csv(valid_constant, "data/processed/oecd_constant_list.csv")

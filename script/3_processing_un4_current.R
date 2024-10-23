@@ -252,14 +252,14 @@ data_selected <- data_processed %>%
   filter(!(overlap == TRUE & is.na(growth_to_next))) %>%
   select(-c(overlap, "...1"))
 
-valid_data_list <- unique(data_selected[, c("country", "year")])
+valid_data_list <- unique(data_selected[, c("iso3", "year")])
 
 #Highlight potential country-year where data_processed could fill gap if we don't find other sources
-gap_filler <- setdiff(unique(data_processed[, c("country", "year")]), valid_data_list)
+gap_filler <- setdiff(unique(data_processed[, c("iso3", "year")]), valid_data_list)
 
 #Save----
 write_csv(data_selected, "data/processed/un4_current.csv")
 write_csv(valid_data_list, "data/processed/un4_current_list.csv")
-write_csv(gap_filler, "data/temp/un4_current_gap_filler_list.csv")
+write_csv(gap_filler, "data/processed/un4_gap_filler_current_list.csv")
 write_csv(data_processed, "data/temp/un4_current_gap_filler_data.csv")
 
