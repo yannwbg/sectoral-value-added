@@ -1,12 +1,5 @@
 library(tidyverse)
 
-national <- read_csv("data/processed/national/national_all.csv") %>%
-  filter(series == "current") %>%
-  select(iso3, year) %>%
-  distinct()
-
-write_csv(national, "data/processed/national_constant_list.csv")
-
 #Load and merge the data----
 country_list <- read_csv("data/processed/country_list.csv") %>%
   select(iso3, country = wb_name)
